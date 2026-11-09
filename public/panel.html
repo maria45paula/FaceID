@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>FaceAccess · Panel</title>
+  <style>
+    :root { --texto:#111; --primario:#0b4f8a; --peligro:#a40000; --ok:#0a6b2d; --borde:#444; }
+    * { box-sizing: border-box; }
+    body { font-family: Arial, sans-serif; font-size: 18px; color: var(--texto); margin: 0; background: #fff; }
+    header { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;
+             padding: 14px 20px; background: var(--primario); color: #fff; }
+    header h1 { margin: 0; font-size: 24px; }
+    main { max-width: 900px; margin: 0 auto; padding: 20px; }
+    section { border: 2px solid var(--borde); border-radius: 12px; padding: 20px; margin-bottom: 24px; }
+    h2 { margin-top: 0; }
+    label { display: block; font-weight: bold; margin: 14px 0 6px; }
+    input[type=text] { width: 100%; font-size: 18px; padding: 10px; border: 2px solid var(--borde); border-radius: 8px; }
+    button { font-size: 18px; padding: 10px 16px; border: 0; border-radius: 8px; cursor: pointer; color: #fff; background: var(--primario); }
+    button.peligro { background: var(--peligro); }
+    button.gris { background: #555; }
+    button.salir { background: #fff; color: var(--primario); font-weight: bold; }
+    :focus-visible { outline: 4px solid #ffb000; outline-offset: 2px; }
+    .consentimiento { border: 2px solid var(--borde); border-radius: 8px; padding: 12px; margin-top: 16px; }
+    .consentimiento label { display: flex; gap: 10px; align-items: flex-start; font-weight: normal; margin: 0; }
+    .consentimiento input { width: 24px; height: 24px; flex: none; margin-top: 2px; }
+    .camara { display: flex; flex-wrap: wrap; gap: 16px; margin-top: 10px; align-items: flex-start; }
+    video, #vista { width: 280px; max-width: 100%; border: 2px solid var(--borde); border-radius: 8px; background: #ddd; }
+    .acciones { margin-top: 20px; display: flex; gap: 12px; flex-wrap: wrap; }
+    #mensaje { margin-top: 14px; font-weight: bold; min-height: 1.4em; }
+    #mensaje.error { color: var(--peligro); }
+    #mensaje.ok { color: var(--ok); }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { border: 1px solid var(--borde); padding: 8px; text-align: left; vertical-align: middle; }
+    th { background: #e8eef5; }
+    td img { width: 56px; height: 56px; object-fit: cover; border-radius: 6px; }
+    td.acc { display: flex; gap: 8px; flex-wrap: wrap; }
+    .oculto { display: none; }
+    .tabla-scroll { overflow-x: auto; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>FaceAccess · Panel de administración</h1>
+    <div>
+      <span id="quien"></span>
+      <button class="salir" id="btnSalir">Cerrar sesión</button>
+    </div>
+  </header>
+
+  <main>
+    <section>
+      <h2 id="tituloForm">Registrar estudiante</h2>
+
+      <label for="nombre">Nombre completo</label>
+      <input type="text" id="nombre">
+
+      <label for="documento">Número de documento</label>
+      <input type="text" id="documento">
+
+      <div class="solo-registro">
+        <div class="consentimiento">
+          <label>
+            <input type="checkbox" id="autorizacion">
+            <span>Autorizo el uso de mis datos personales y de mi rostro para el control de ingreso, de acuerdo con la Ley 1581 de 2012. Puedo pedir que se eliminen en cualquier momento.</span>
+          </label>
+        </div>
+
+        <h3>Foto del rostro</h3>
+        <div class="camara">
+          <video id="video" autoplay playsinline muted aria-label="Vista de la cámara"></video>
+          <div>
+            <button id="btnFoto" type="button">Tomar foto</button>
+            <p><img id="vista" class="oculto" alt="Foto capturada"></p>
+          </div>
+        </div>
+      </div>
+
+      <div class="acciones">
+        <button id="btnGuardar" type="button">Guardar estudiante</button>
+        <button id="btnCancelar" type="button" class="gris oculto">Cancelar</button>
+      </div>
+      <p id="mensaje" role="alert" aria-live="assertive"></p>
+    </section>
+
+    <section>
+      <h2>Estudiantes registrados</h2>
+      <div class="tabla-scroll">
+        <table>
+          <thead><tr><th>Foto</th><th>Nombre</th><th>Documento</th><th>Acciones</th></tr></thead>
+          <tbody id="lista"></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    let editandoId = null;     // null = registrando, número = editando ese estudiante
+    let fotoBase64 = null;
+
+    const el = id => document.getElementById(id);
+    const video = el('video');
+
+    function avisar(texto, tipo) {
+      el('mensaje').textContent = texto;
+      el('mensaje').className = tipo || '';
+    }
+
+    // Llamada a la API; si la sesión venció, vuelve al login
+    async function api(url, opciones) {
+      const resp = await fetch(url, opciones);
+      if (resp.status === 401) { window.location.href = '/login.html'; throw new Error('Sin sesión'); }
+      const datos = await resp.json().catch(() => ({}));
+      return { ok: resp.ok, datos };
+    }
+
+    // ---------- Sesión (SCRUM-22 / SCRUM-25) ----------
+    async function verificarSesion() {
+      const r = await api('/api/auth/me');
+      el('quien').textContent = r.datos.nombre + ' (' + r.datos.rol + ') ';
+    }
+
+    el('btnSalir').addEventListener('click', async () => {
+      await fetch('/api/auth/logout', { method: 'POST' });
+      window.location.href = '/login.html';
+    });
+
+    // ---------- Cámara y foto (SCRUM-12) ----------
+    navigator.mediaDevices.getUserMedia({ video: true })
+      .then(stream => { video.srcObject = stream; })
+      .catch(() => avisar('No se pudo acceder a la cámara. Revise los permisos del navegador.', 'error'));
+
+    el('btnFoto').addEventListener('click', () => {
+      if (!video.videoWidth) { avisar('La cámara no está lista todavía.', 'error'); return; }
+      const canvas = document.createElement('canvas');
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      canvas.getContext('2d').drawImage(video, 0, 0);
+      fotoBase64 = canvas.toDataURL('image/jpeg', 0.8);
+      el('vista').src = fotoBase64;
+      el('vista').classList.remove('oculto');
+      avisar('Foto tomada. Si no se ve bien, puede tomarla de nuevo.', 'ok');
+    });
+
+    // ---------- Lista de estudiantes ----------
+    async function cargarLista() {
+      const r = await api('/api/estudiantes');
+      const cuerpo = el('lista');
+      cuerpo.innerHTML = '';
+      if (!r.datos.length) {
+        const fila = cuerpo.insertRow();
+        const celda = fila.insertCell();
+        celda.colSpan = 4;
+        celda.textContent = 'Todavía no hay estudiantes registrados.';
+        return;
+      }
+      r.datos.forEach(e => {
+        const fila = cuerpo.insertRow();
+
+        const celdaFoto = fila.insertCell();
+        if (e.tiene_foto) {
+          const img = document.createElement('img');
+          img.src = '/api/estudiantes/' + e.id + '/foto';
+          img.alt = 'Foto de ' + e.nombre;
+          celdaFoto.appendChild(img);
+        }
+        fila.insertCell().textContent = e.nombre;       // textContent evita inyectar HTML
+        fila.insertCell().textContent = e.documento;
+
+        const celdaAcc = fila.insertCell();
+        celdaAcc.className = 'acc';
+        const bEditar = document.createElement('button');
+        bEditar.textContent = 'Editar';
+        bEditar.addEventListener('click', () => iniciarEdicion(e));
+        const bEliminar = document.createElement('button');
+        bEliminar.textContent = 'Eliminar';
+        bEliminar.className = 'peligro';
+        bEliminar.addEventListener('click', () => eliminar(e));
+        celdaAcc.append(bEditar, bEliminar);
+      });
+    }
+
+    // ---------- Registrar (SCRUM-11 / SCRUM-13) y editar (SCRUM-14) ----------
+    el('btnGuardar').addEventListener('click', async () => {
+      const nombre = el('nombre').value.trim();
+      const documento = el('documento').value.trim();
+
+      if (editandoId) {
+        const r = await api('/api/estudiantes/' + editandoId, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ nombre, documento })
+        });
+        if (!r.ok) { avisar(r.datos.error, 'error'); return; }
+        avisar('Estudiante actualizado correctamente.', 'ok');
+      } else {
+        const r = await api('/api/estudiantes', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            nombre, documento,
+            autorizacion: el('autorizacion').checked,
+            foto: fotoBase64
+          })
+        });
+        if (!r.ok) { avisar(r.datos.error, 'error'); return; }
+        avisar('Estudiante registrado correctamente.', 'ok');
+      }
+      limpiarFormulario(true);
+      cargarLista();
+    });
+
+    function iniciarEdicion(e) {
+      editandoId = e.id;
+      el('nombre').value = e.nombre;
+      el('documento').value = e.documento;
+      el('tituloForm').textContent = 'Editar estudiante';
+      el('btnGuardar').textContent = 'Actualizar estudiante';
+      el('btnCancelar').classList.remove('oculto');
+      document.querySelector('.solo-registro').classList.add('oculto');
+      avisar('', '');
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+
+    el('btnCancelar').addEventListener('click', () => limpiarFormulario(false));
+
+    function limpiarFormulario(conservarMensaje) {
+      editandoId = null;
+      fotoBase64 = null;
+      el('nombre').value = '';
+      el('documento').value = '';
+      el('autorizacion').checked = false;
+      el('vista').classList.add('oculto');
+      el('tituloForm').textContent = 'Registrar estudiante';
+      el('btnGuardar').textContent = 'Guardar estudiante';
+      el('btnCancelar').classList.add('oculto');
+      document.querySelector('.solo-registro').classList.remove('oculto');
+      if (!conservarMensaje) avisar('', '');
+    }
+
+    // ---------- Eliminar (SCRUM-36) ----------
+    async function eliminar(e) {
+      if (!confirm('¿Eliminar a ' + e.nombre + '? Se borrarán también su foto y su autorización.')) return;
+      const r = await api('/api/estudiantes/' + e.id, { method: 'DELETE' });
+      if (!r.ok) { avisar(r.datos.error, 'error'); return; }
+      avisar('Estudiante eliminado.', 'ok');
+      cargarLista();
+    }
+
+    verificarSesion().then(cargarLista);
+  </script>
+</body>
+</html>

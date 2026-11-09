@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>FaceAccess · Iniciar sesión</title>
+  <style>
+    :root { --fondo:#ffffff; --texto:#111111; --primario:#0b4f8a; --error:#a40000; --borde:#444; }
+    * { box-sizing: border-box; }
+    body { font-family: Arial, sans-serif; font-size: 20px; color: var(--texto); background: var(--fondo);
+           margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 16px; }
+    main { width: 100%; max-width: 440px; border: 2px solid var(--borde); border-radius: 12px; padding: 28px; }
+    h1 { margin: 0 0 20px; font-size: 28px; }
+    label { display: block; font-weight: bold; margin: 16px 0 6px; }
+    input { width: 100%; font-size: 20px; padding: 12px; border: 2px solid var(--borde); border-radius: 8px; }
+    button { width: 100%; margin-top: 24px; font-size: 22px; padding: 14px; background: var(--primario);
+             color: #fff; border: 0; border-radius: 8px; cursor: pointer; }
+    :focus-visible { outline: 4px solid #ffb000; outline-offset: 2px; }
+    #mensaje { margin-top: 16px; color: var(--error); font-weight: bold; min-height: 1.4em; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>FaceAccess</h1>
+    <label for="usuario">Usuario</label>
+    <input id="usuario" type="text" autocomplete="username">
+    <label for="contrasena">Contraseña</label>
+    <input id="contrasena" type="password" autocomplete="current-password">
+    <button id="entrar">Iniciar sesión</button>
+    <p id="mensaje" role="alert" aria-live="assertive"></p>
+  </main>
+
+  <script>
+    const mensaje = document.getElementById('mensaje');
+
+    async function iniciarSesion() {
+      mensaje.textContent = '';
+      const usuario = document.getElementById('usuario').value.trim();
+      const contrasena = document.getElementById('contrasena').value;
+
+      const resp = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ usuario, contrasena })
+      });
+      const datos = await resp.json();
+
+      if (resp.ok) {
+        window.location.href = '/panel.html';     // éxito: entra al panel
+      } else {
+        mensaje.textContent = datos.error;        // fallo: muestra el mensaje del servidor
+      }
+    }
+
+    document.getElementById('entrar').addEventListener('click', iniciarSesion);
+    document.getElementById('contrasena').addEventListener('keydown', e => {
+      if (e.key === 'Enter') iniciarSesion();
+    });
+  </script>
+</body>
+</html>
