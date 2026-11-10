@@ -8,3 +8,4 @@
    npm start
 5. Abrir http://localhost:3000/login.html
    Usuario: admin   Contraseña: admin123
+# Face_ID
