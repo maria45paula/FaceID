@@ -40,7 +40,7 @@ router.get('/:id/foto', async (req, res) => {
 
 // SCRUM-11 + SCRUM-13 + SCRUM-12: registrar estudiante con autorización y foto
 router.post('/', async (req, res) => {
-  const { nombre, documento, autorizacion, foto } = req.body || {};
+  const { nombre, documento, autorizacion, foto, descriptor } = req.body || {};
 
   if (!nombre || !documento) {
     return res.status(400).json({ error: 'Complete todos los campos obligatorios' });
@@ -50,6 +50,12 @@ router.post('/', async (req, res) => {
   }
   if (typeof foto !== 'string' || !foto.startsWith('data:image/jpeg;base64,')) {   // SCRUM-12
     return res.status(400).json({ error: 'Debe tomar la foto del rostro' });
+  }
+  // Sprint verificación facial: el descriptor son los 128 números que identifican el rostro
+  const descriptorOk = Array.isArray(descriptor) && descriptor.length === 128 &&
+                       descriptor.every(n => typeof n === 'number' && Number.isFinite(n));
+  if (!descriptorOk) {
+    return res.status(400).json({ error: 'No se detectó un rostro en la foto. Tómela de nuevo' });
   }
 
   const conn = await db.getConnection();
@@ -72,7 +78,8 @@ router.post('/', async (req, res) => {
     fs.writeFileSync(rutaArchivo, Buffer.from(base64, 'base64'));
 
     await conn.query(
-      'INSERT INTO rostros (estudiante_id, foto_ruta) VALUES (?, ?)', [id, rutaRelativa]);
+      'INSERT INTO rostros (estudiante_id, foto_ruta, descriptor) VALUES (?, ?, ?)',
+      [id, rutaRelativa, JSON.stringify(descriptor)]);
 
     await conn.commit();
     res.status(201).json({ ok: true, id });

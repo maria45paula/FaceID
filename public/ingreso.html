@@ -42,7 +42,7 @@
             <p class="nota"><a href="/login.html">Acceso del personal</a></p>
         </main>
 
-        <script src="/js/face_api.js"></script>
+        <script src="/js/face-api.js"></script>
         <script>
             const el= id => document.getElementById(id);
             const video =el('video');
@@ -64,7 +64,7 @@
             }
             
             //abrir la camara
-            async function abrirCamra(){
+            async function abrirCamara(){
                 try{
                 const stream =await navigator.mediaDevices.getUserMedia({video:true});
                 video.srcObject=stream;
@@ -86,7 +86,7 @@
             }
 
             function listoParaVerificar(){
-                if(modeloListos && camaraLista){
+                if(modelosListos && camaraLista){
                     btn.disabled=false;
                     mostrar('info', 'Listo', 'Ubíquese frente a la cámara y pulse «Verificar identidad».');
                 }

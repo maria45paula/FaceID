@@ -6,7 +6,7 @@ const fs = require('fs');
 
 const app = express();
 
-// Carpeta de fotos: está FUERA de "public", así nadie las abre escribiendo la URL (SCRUM-29)
+// Carpeta de fotos: está FUERA de "public", así nadie las abre escribiendo la URL
 fs.mkdirSync(path.join(__dirname, 'uploads'), { recursive: true });
 
 app.use(express.json({ limit: '5mb' }));   // la foto viaja como texto base64
@@ -20,5 +20,6 @@ app.use(express.static(path.join(__dirname, 'public')));
 
 app.use('/api/auth', require('./routes/auth'));
 app.use('/api/estudiantes', require('./routes/estudiantes'));
+app.use('/api/ingreso', require('./routes/ingreso'));
 
 app.listen(3000, () => console.log('FaceAccess en http://localhost:3000/login.html'));

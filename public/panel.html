@@ -94,9 +94,12 @@
     </section>
   </main>
 
+  <script src="/js/face-api.js"></script>
   <script>
     let editandoId = null;     // null = registrando, número = editando ese estudiante
     let fotoBase64 = null;
+    let descriptorFacial = null;   // los 128 números del rostro, calculados al tomar la foto
+    let modelosListos = false;
 
     const el = id => document.getElementById(id);
     const video = el('video');
@@ -130,16 +133,47 @@
       .then(stream => { video.srcObject = stream; })
       .catch(() => avisar('No se pudo acceder a la cámara. Revise los permisos del navegador.', 'error'));
 
-    el('btnFoto').addEventListener('click', () => {
+    // Modelos de reconocimiento facial (se cargan una sola vez)
+    async function cargarModelos() {
+      try {
+        await faceapi.nets.tinyFaceDetector.loadFromUri('/models');
+        await faceapi.nets.faceLandmark68Net.loadFromUri('/models');
+        await faceapi.nets.faceRecognitionNet.loadFromUri('/models');
+        modelosListos = true;
+      } catch (e) {
+        avisar('No se pudieron cargar los modelos de reconocimiento facial.', 'error');
+      }
+    }
+
+    el('btnFoto').addEventListener('click', async () => {
       if (!video.videoWidth) { avisar('La cámara no está lista todavía.', 'error'); return; }
+      if (!modelosListos) { avisar('Cargando el reconocimiento facial, intente en unos segundos.', 'error'); return; }
+
       const canvas = document.createElement('canvas');
       canvas.width = video.videoWidth;
       canvas.height = video.videoHeight;
       canvas.getContext('2d').drawImage(video, 0, 0);
+
+      // Se busca un rostro en la foto capturada y se calcula su descriptor
+      avisar('Analizando la foto…', '');
+      const r = await faceapi
+        .detectSingleFace(canvas, new faceapi.TinyFaceDetectorOptions())
+        .withFaceLandmarks()
+        .withFaceDescriptor();
+
+      if (!r) {   // no se detectó ningún rostro: se pide repetir la foto
+        fotoBase64 = null;
+        descriptorFacial = null;
+        el('vista').classList.add('oculto');
+        avisar('No se detectó un rostro. Acérquese, mire a la cámara y mejore la luz.', 'error');
+        return;
+      }
+
+      descriptorFacial = Array.from(r.descriptor);   // Float32Array -> arreglo normal para enviarlo en JSON
       fotoBase64 = canvas.toDataURL('image/jpeg', 0.8);
       el('vista').src = fotoBase64;
       el('vista').classList.remove('oculto');
-      avisar('Foto tomada. Si no se ve bien, puede tomarla de nuevo.', 'ok');
+      avisar('Rostro detectado. Si la foto no se ve bien, puede tomarla de nuevo.', 'ok');
     });
 
     // ---------- Lista de estudiantes ----------
@@ -200,7 +234,8 @@
           body: JSON.stringify({
             nombre, documento,
             autorizacion: el('autorizacion').checked,
-            foto: fotoBase64
+            foto: fotoBase64,
+            descriptor: descriptorFacial
           })
         });
         if (!r.ok) { avisar(r.datos.error, 'error'); return; }
@@ -227,6 +262,7 @@
     function limpiarFormulario(conservarMensaje) {
       editandoId = null;
       fotoBase64 = null;
+      descriptorFacial = null;
       el('nombre').value = '';
       el('documento').value = '';
       el('autorizacion').checked = false;
@@ -247,6 +283,7 @@
       cargarLista();
     }
 
+    cargarModelos();
     verificarSesion().then(cargarLista);
   </script>
 </body>
