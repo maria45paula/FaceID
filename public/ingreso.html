@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="es">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <title>FaceAccess · Ingreso</title>
+        <style>
+            :root { --texto:#111; --borde:#444; --primario:#0b4f8a; --ok:#0a6b2d; --error:#a40000; --info:#e8eef5; }
+            * { box-sizing: border-box; }
+            body { font-family: Arial, sans-serif; font-size: 20px; color: var(--texto); margin: 0; padding: 16px; background: #fff; }
+            main { max-width: 560px; margin: 0 auto; display: flex; flex-direction: column; gap: 16px; }
+            h1 { margin: 0; font-size: 28px; text-align: center; }
+            video { width: 100%; border: 3px solid var(--borde); border-radius: 12px; background: #ddd; }
+            button { font-size: 24px; padding: 16px; border: 0; border-radius: 10px; background: var(--primario); color: #fff; cursor: pointer; }
+            button:disabled { background: #777; cursor: not-allowed; }
+            :focus-visible { outline: 4px solid #ffb000; outline-offset: 2px; }
+
+            /* SCRUM-17: resultado en texto grande, con ícono y texto (no solo color) */
+            .resultado { border-radius: 12px; padding: 20px; text-align: center; border: 3px solid var(--borde); background: var(--info); }
+            .resultado.ok { background: var(--ok); color: #fff; border-color: var(--ok); }
+            .resultado.error { background: var(--error); color: #fff; border-color: var(--error); }
+            .resultado .icono { font-size: 64px; line-height: 1; }
+            .resultado .titulo { font-size: 40px; font-weight: bold; margin: 8px 0; }
+            .resultado .detalle { font-size: 22px; margin: 0; }
+            #tiempo { text-align: center; font-size: 16px; color: #333; min-height: 1.2em; }
+            .nota { font-size: 16px; text-align: center; color: #333; }
+        </style>
+    </head>
+    <body>
+        <main>
+            <h1>FaceAccess · Ingreso</h1>
+            <video id="video" autoplay playsinline muted arial-label="vista de la camara"></video>
+            <button id="btnVerificar" disabled>Verificar Identidad</button>
+            <div id="resultado" class="resultado info" role="alert" aria-live="assertive">
+                <div class="icono" id="icono">..</div>
+                <div class="titulo" id="titulo">Cargando..</div>
+                <p class="detalle" id="detalle">Preparando el sistema</p>
+            </div>
+
+            <div id="tiempo"></div>
+            <p class="nota">Si el reconocimiento facial no funciona se utilizara otro metodo</p>
+            <p class="nota"><a href="/login.html">Acceso del personal</a></p>
+        </main>
+
+        <script src="/js/face_api.js"></script>
+        <script>
+            const el= id => document.getElementById(id);
+            const video =el('video');
+            const btn =el('btnVerificar');
+            const TIEMPO_MAXIMO_BUSQUEDA=10000;
+            const META_RAPIDEZ =3000;
+            let modelosListos=false;
+            let camaraLista=false;
+
+            const dormir =ms => new Promise(r=> setTimeout(r, ms));
+
+
+            //Seccion para mostrar un mensaje grande ya sea error, info, ok
+            function mostrar(tipo, titulo,detalle){
+                el('resultado').className = 'resultado ' + tipo;
+                el('icono').textContent = tipo === 'ok' ? '✔' : tipo === 'error' ? '✘' : '…';
+                el('titulo').textContent = titulo;
+                el('detalle').textContent = detalle || '';
+            }
+            
+            //abrir la camara
+            async function abrirCamra(){
+                try{
+                const stream =await navigator.mediaDevices.getUserMedia({video:true});
+                video.srcObject=stream;
+                camaraLista=true;
+                }catch(e){
+                    mostrar('error', 'No se pudo cargar el reconocimiento facial', 'Recargue la página.');
+                }
+            }
+
+            async function cargarModelos(){
+                try {
+                    await faceapi.nets.tinyFaceDetector.loadFromUri('/models');
+                    await faceapi.nets.faceLandmark68Net.loadFromUri('/models');
+                    await faceapi.nets.faceRecognitionNet.loadFromUri('/models');
+                    modelosListos = true;
+                } catch (e) {
+                    mostrar('error, No se pudo cargar el reconocimiento facial, Recargue la página.');
+                }
+            }
+
+            function listoParaVerificar(){
+                if(modeloListos && camaraLista){
+                    btn.disabled=false;
+                    mostrar('info', 'Listo', 'Ubíquese frente a la cámara y pulse «Verificar identidad».');
+                }
+            }
+
+            async function verificar(){
+                btn.disabled=true;
+                el('tiempo').textContent='';
+                mostrar('info', 'Buscando su rostro…', 'Mire a la cámara.');
+
+                const inicioBusqueda=performance.now();
+                let deteccion=null;
+                let inicioIntento=0;
+                while(performance.now() - inicioBusqueda< TIEMPO_MAXIMO_BUSQUEDA){
+                    inicioIntento=performance.now();
+                    deteccion=await faceapi.detectSingleFace(video, new faceapi.TinyFaceDetectorOptions())
+                        .withFaceLandmarks()
+                        .withFaceDescriptor();
+                    if (deteccion) break;
+                     await dormir(500);
+                }
+
+                if (!deteccion) {   // pasaron 10 s sin ver un rostro
+                    mostrar('error', 'No se detecto su rostro', 'Acerquese o mejore la luz y pulse:Verificar identidad, de nuevo.');
+                    btn.disabled = false;
+                    return;
+                }
+
+                mostrar('info', 'Verificando…', '');   // se ve si la respuesta tarda más de lo esperado
+
+                try {
+                    const resp = await fetch('/api/ingreso/verificar', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ descriptor: Array.from(deteccion.descriptor) })
+                    });
+                    const datos = await resp.json();
+                    const tiempo = Math.round(performance.now() - inicioIntento);
+
+                    if (!resp.ok) {
+                    mostrar('error', 'No se pudo completar', datos.error + '. Pulse «Verificar identidad» para reintentar.');
+                    } else if (datos.resultado === 'permitido') {
+                    mostrar('ok', 'Acceso permitido', 'Bienvenido(a), ' + datos.nombre);
+                    } else {
+                    mostrar('error', 'Acceso denegado', 'No se reconoció su rostro. Intente de nuevo o use el ingreso alternativo.');
+                    }
+
+                    // SCRUM-28: evidencia de rapidez
+                    console.log('Tiempo de verificación (ms):', tiempo);
+                    el('tiempo').textContent = 'Tiempo de verificación: ' + tiempo + ' ms' +
+                    (tiempo > META_RAPIDEZ ? ' (superó la meta de 3 s)' : '');
+                } catch (e) {
+                    mostrar('error', 'No se pudo conectar con el servidor', 'Revise la conexión y pulse «Verificar identidad» para reintentar.');
+                }
+                btn.disabled = false;
+            }
+            
+            btn.addEventListener('click', verificar);
+
+            // Arranque: cámara y modelos en paralelo
+            mostrar('info', 'Cargando…', 'Preparando la cámara y el reconocimiento facial.');
+            Promise.all([abrirCamara(), cargarModelos()]).then(listoParaVerificar);
+    
+        </script>
+    </body>
+
+</html>
